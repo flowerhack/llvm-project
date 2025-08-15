@@ -79,10 +79,15 @@ bool ForRangeCopyCheck::handleConstValueCopy(const VarDecl &LoopVar,
   } else if (!LoopVar.getType().isConstQualified()) {
     return false;
   }
-  std::optional<bool> Expensive =
-      utils::type_traits::isExpensiveToCopy(LoopVar.getType(), Context);
-  if (!Expensive || !*Expensive)
-    return false;
+
+  // TODO: Check if this is actually needed for some cases? It seems redundant
+  // with the Expensive check in handleCopyIsOnlyConstReferenced but maybe
+  // I'm missing something
+  //std::optional<bool> Expensive =
+  //    utils::type_traits::isExpensiveToCopy(LoopVar.getType(), Context);
+  //if (!Expensive || !*Expensive)
+  //  return false;
+
   auto Diagnostic =
       diag(LoopVar.getLocation(),
            "the loop variable's type is not a reference type; this creates a "
@@ -108,10 +113,16 @@ static bool isReferenced(const VarDecl &LoopVar, const Stmt &Stmt,
 bool ForRangeCopyCheck::handleCopyIsOnlyConstReferenced(
     const VarDecl &LoopVar, const CXXForRangeStmt &ForRange,
     ASTContext &Context) {
-  std::optional<bool> Expensive =
-      utils::type_traits::isExpensiveToCopy(LoopVar.getType(), Context);
-  if (LoopVar.getType().isConstQualified() || !Expensive || !*Expensive)
-    return false;
+
+  // TODO: Add some toggle here for caring about Expensive. Legacy checks
+  // care about this but our new check does not.
+  // Simply disabling the Expensive check altogether for now so we can test the
+  // new check.
+  //std::optional<bool> Expensive =
+  //    utils::type_traits::isExpensiveToCopy(LoopVar.getType(), Context);
+  //if (LoopVar.getType().isConstQualified() || !Expensive || !*Expensive)
+  //  return false;
+
   // We omit the case where the loop variable is not used in the loop body. E.g.
   //
   // for (auto _ : benchmark_state) {
@@ -131,6 +142,16 @@ bool ForRangeCopyCheck::handleCopyIsOnlyConstReferenced(
             LoopVar, Context, Qualifiers::Const))
       Diag << *Fix << utils::fixit::changeVarDeclToReference(LoopVar, Context);
 
+    return true;
+  }
+
+  // If it's copied and mutated, there's a high chance that's a bug.
+  if (ExprMutationAnalyzer(*ForRange.getBody(), Context).isMutated(&LoopVar)) {
+    auto Diag = diag(LoopVar.getLocation(),
+    "loop variable is copied and then modified, which is likely a bug; you "
+    "probably want to modify the underlying object and not this copy. If you "
+    "*did* intend to modify this copy, please use an explicit copy inside the "
+    "body of the loop");
     return true;
   }
   return false;
